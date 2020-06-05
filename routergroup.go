@@ -69,6 +69,7 @@ func (group *RouterGroup) BasePath() string {
 	return group.basePath
 }
 
+// 添加请求路由
 func (group *RouterGroup) handle(httpMethod, relativePath string, handlers HandlersChain) IRoutes {
 	absolutePath := group.calculateAbsolutePath(relativePath)
 	handlers = group.combineHandlers(handlers)

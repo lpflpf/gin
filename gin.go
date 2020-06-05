@@ -107,11 +107,11 @@ type Engine struct {
 	secureJSONPrefix string
 	HTMLRender       render.HTMLRender
 	FuncMap          template.FuncMap
-	allNoRoute       HandlersChain
+	allNoRoute       HandlersChain // 包含 no route 的 所有handlers
 	allNoMethod      HandlersChain
-	noRoute          HandlersChain
+	noRoute          HandlersChain // 不存在路径的route
 	noMethod         HandlersChain
-	pool             sync.Pool
+	pool             sync.Pool // 对象池
 	trees            methodTrees
 	maxParams        uint16
 }
@@ -260,6 +260,8 @@ func (engine *Engine) addRoute(method, path string, handlers HandlersChain) {
 	debugPrintRoute(method, path, handlers)
 
 	root := engine.trees.get(method)
+
+	// 如果不存在，创建一个路由树
 	if root == nil {
 		root = new(node)
 		root.fullPath = "/"
@@ -371,7 +373,7 @@ func (engine *Engine) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	c := engine.pool.Get().(*Context)
 	c.writermem.reset(w)
 	c.Request = req
-	c.reset()
+	c.reset() // 初始化 context
 
 	engine.handleHTTPRequest(c)
 
@@ -389,6 +391,7 @@ func (engine *Engine) HandleContext(c *Context) {
 	c.index = oldIndexValue
 }
 
+// 对请求的处理
 func (engine *Engine) handleHTTPRequest(c *Context) {
 	httpMethod := c.Request.Method
 	rPath := c.Request.URL.Path
@@ -438,6 +441,8 @@ func (engine *Engine) handleHTTPRequest(c *Context) {
 			if tree.method == httpMethod {
 				continue
 			}
+
+			// 判断是不是因为方法名不同导致的。
 			if value := tree.root.getValue(rPath, nil, unescape); value.handlers != nil {
 				c.handlers = engine.allNoMethod
 				serveError(c, http.StatusMethodNotAllowed, default405Body)

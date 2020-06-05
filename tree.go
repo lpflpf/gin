@@ -48,6 +48,7 @@ func (ps Params) ByName(name string) (va string) {
 	return
 }
 
+// 不同method 存储不同的路由树
 type methodTree struct {
 	method string
 	root   *node
@@ -100,8 +101,8 @@ const (
 type node struct {
 	path      string
 	indices   string
-	wildChild bool
-	nType     nodeType
+	wildChild bool     // 可能是带参数的，或者是 * 的，所以是野节点
+	nType     nodeType // 参数节点，静态节点
 	priority  uint32
 	children  []*node
 	handlers  HandlersChain
@@ -156,6 +157,7 @@ walk:
 
 		// Split edge
 		if i < len(n.path) {
+			// 添加新节点，并将将原有的节点作为子节点
 			child := node{
 				path:      n.path[i:],
 				wildChild: n.wildChild,
@@ -176,6 +178,7 @@ walk:
 		}
 
 		// Make new node a child of this node
+		// 添加了一个比较长的路径
 		if i < len(path) {
 			path = path[i:]
 
@@ -193,6 +196,7 @@ walk:
 					continue walk
 				}
 
+				// 包含了 * ，又添加了重叠的路径
 				pathSeg := path
 				if n.nType != catchAll {
 					pathSeg = strings.SplitN(path, "/", 2)[0]
@@ -217,6 +221,7 @@ walk:
 
 			// Check if a child with the next path byte exists
 			for i, max := 0, len(n.indices); i < max; i++ {
+				// 如果已经有对应的首字母，就在子节点下创建路径
 				if c == n.indices[i] {
 					parentFullPathIndex += len(n.path)
 					i = n.incrementChildPrio(i)
@@ -226,6 +231,7 @@ walk:
 			}
 
 			// Otherwise insert it
+			// 插入一个子节点
 			if c != ':' && c != '*' {
 				// []byte for proper unicode char conversion, see #65
 				n.indices += bytesconv.BytesToString([]byte{c})
@@ -265,7 +271,7 @@ func findWildcard(path string) (wildcard string, i int, valid bool) {
 		for end, c := range []byte(path[start+1:]) {
 			switch c {
 			case '/':
-				return path[start : start+1+end], start, valid
+				return path[start : start+1+end], start, valid // 返回 带有参数的，或者 * 匹配的路径
 			case ':', '*':
 				valid = false
 			}
@@ -296,13 +302,14 @@ func (n *node) insertChild(path string, fullPath string, handlers HandlersChain)
 
 		// Check if this node has existing children which would be
 		// unreachable if we insert the wildcard here
-		if len(n.children) > 0 {
+		if len(n.children) > 0 { // 如果有别的路径，也是不行的
 			panic("wildcard segment '" + wildcard +
 				"' conflicts with existing children in path '" + fullPath + "'")
 		}
 
+		// 参数类型的
 		if wildcard[0] == ':' { // param
-			if i > 0 {
+			if i > 0 { //前缀路径
 				// Insert prefix before the current wildcard
 				n.path = path[:i]
 				path = path[i:]
@@ -311,15 +318,17 @@ func (n *node) insertChild(path string, fullPath string, handlers HandlersChain)
 			n.wildChild = true
 			child := &node{
 				nType:    param,
-				path:     wildcard,
+				path:     wildcard, // 参数名称
 				fullPath: fullPath,
 			}
 			n.children = []*node{child}
 			n = child
-			n.priority++
+			n.priority++ // 修改子节点的priority
 
 			// if the path doesn't end with the wildcard, then there
 			// will be another non-wildcard subpath starting with '/'
+
+			// 如果后面还有路径
 			if len(wildcard) < len(path) {
 				path = path[len(wildcard):]
 
@@ -333,7 +342,7 @@ func (n *node) insertChild(path string, fullPath string, handlers HandlersChain)
 			}
 
 			// Otherwise we're done. Insert the handle in the new leaf
-			n.handlers = handlers
+			n.handlers = handlers // 在新节点上添加handler
 			return
 		}
 
@@ -352,6 +361,7 @@ func (n *node) insertChild(path string, fullPath string, handlers HandlersChain)
 			panic("no / before catch-all in path '" + fullPath + "'")
 		}
 
+		// catchAll 路径
 		n.path = path[:i]
 
 		// First node: catchAll node with empty path
@@ -424,10 +434,11 @@ walk: // Outer loop for walking the tree
 					return
 				}
 
+				// 有 * 或者 参数的url
 				// Handle wildcard child
 				n = n.children[0]
 				switch n.nType {
-				case param:
+				case param: // 参数化的请求
 					// Find param end (either '/' or path end)
 					end := 0
 					for end < len(path) && path[end] != '/' {
@@ -448,6 +459,7 @@ walk: // Outer loop for walking the tree
 								val = v
 							}
 						}
+						// 参数存起来
 						(*value.params)[i] = Param{
 							Key:   n.path[1:],
 							Value: val,
@@ -456,6 +468,7 @@ walk: // Outer loop for walking the tree
 
 					// we need to go deeper!
 					if end < len(path) {
+						// 可能还有别的参数
 						if len(n.children) > 0 {
 							path = path[end:]
 							n = n.children[0]
@@ -463,6 +476,7 @@ walk: // Outer loop for walking the tree
 						}
 
 						// ... but we can't
+						// 无法解析更长的路径
 						value.tsr = (len(path) == end+1)
 						return
 					}
@@ -475,7 +489,7 @@ walk: // Outer loop for walking the tree
 						// No handle found. Check if a handle for this path + a
 						// trailing slash exists for TSR recommendation
 						n = n.children[0]
-						value.tsr = (n.path == "/" && n.handlers != nil)
+						value.tsr = n.path == "/" && n.handlers != nil
 					}
 					return
 
